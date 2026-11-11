@@ -66,6 +66,68 @@ services:
       # 127.0.0.1 is the security boundary, not decoration: for as long as this
       # is up the port shows a live Microsoft sign-in page. Publishing it on
       # 0.0.0.0 would offer that to the whole network.
-      - "127.0.0.1:6080:6080"
+      - "0.0.0.0:6080:6080"
     volumes:
       - ./data-dir:/app/data-dir
+  gluetun:
+    image: qmcgaw/gluetun:latest
+    cap_add:
+      - NET_ADMIN
+    devices:
+      - /dev/net/tun:/dev/net/tun
+
+    volumes:
+      - ./wg.conf:/gluetun/wireguard/wg0.conf:ro
+
+    environment:
+      VPN_SERVICE_PROVIDER: custom
+      VPN_TYPE: wireguard
+
+    ports:
+      - "0.0.0.0:6081:6080"
+
+    restart: unless-stopped
+
+  rewards-farmer-vpn:
+    build: .
+    image: rewards-farmer
+    shm_size: 1gb
+
+    env_file:
+      - path: .env
+        required: false
+
+    environment:
+      QUERY_SOURCE: ${QUERY_SOURCE:-trends}
+      REWARDS_HEADLESS: "1"
+
+    # This is the important part:
+    network_mode: "service:gluetun"
+
+    depends_on:
+      gluetun:
+        condition: service_healthy
+
+    volumes:
+      # Separate browser profile/data from the non-VPN instance.
+      - ./data-dir-vpn:/app/data-dir
+      - ./visual_search.jpg:/app/visual_search.jpg:ro
+
+  signin-vpn:
+    build: .
+    image: rewards-farmer
+    shm_size: 1gb
+
+    command: ["python", "src/signin.py"]
+
+    environment:
+      REWARDS_ACCOUNTS: ${REWARDS_ACCOUNTS:-}
+
+    network_mode: "service:gluetun"
+
+    depends_on:
+      gluetun:
+        condition: service_healthy
+
+    volumes:
+      - ./data-dir-vpn:/app/data-dir
